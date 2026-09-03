@@ -1,24 +1,19 @@
-# Flutter/Public
- flutter/packages/flutter/.pub-cache
- flutter/packages/flutter/.metadata
+# Flutter/Dart
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .flutter-plugins-version-mapping
-
-# Dart
-.dart_tool
-.dart_wasm
+.metadata
 
 # Build output
 build/
-!.dart_tool
 
 # IDE
 .vscode/
 .vscode/*.code-workspace
 .idea/
 *.code-workspace
+*.iml
 
 # MacOS
 .DS_Store
@@ -36,11 +31,11 @@ Thumbs_cache
 # Logs
 *.log
 
-# Package manager
-*.lock
-
 # Secret files
 .env
 
 # Custom
 chromodoro.db.bak
+*.db
+*.db-wal
+*.db-shm
