@@ -1,0 +1,46 @@
+# Flutter/Public
+ flutter/packages/flutter/.pub-cache
+ flutter/packages/flutter/.metadata
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-plugins-version-mapping
+
+# Dart
+.dart_tool
+.dart_wasm
+
+# Build output
+build/
+!.dart_tool
+
+# IDE
+.vscode/
+.vscode/*.code-workspace
+.idea/
+*.code-workspace
+
+# MacOS
+.DS_Store
+AppleDouble
+.LSOverride
+_.DS_Store
+Spotlight-V100
+.iconpack-info
+.owner
+
+# Windows Thumbs
+Thumbs.db
+Thumbs_cache
+
+# Logs
+*.log
+
+# Package manager
+*.lock
+
+# Secret files
+.env
+
+# Custom
+chromodoro.db.bak
