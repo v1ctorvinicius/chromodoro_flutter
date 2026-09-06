@@ -12,6 +12,17 @@ String formatDuration(int seconds) {
   return mins > 0 ? '${hours}h ${mins}m' : '${hours}h';
 }
 
+/// Compact duration like the Python `format_duration` used in the dashboard
+/// footer: "0 min", "12 min", "2h 5m", "2h".
+String formatDurationShort(int seconds) {
+  if (seconds < 60) return '0 min';
+  final hours = seconds ~/ 3600;
+  final minutes = (seconds % 3600) ~/ 60;
+  if (hours == 0) return '$minutes min';
+  if (minutes > 0) return '${hours}h ${minutes}m';
+  return '${hours}h';
+}
+
 String formatDayLabel(DateTime date) {
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);

@@ -19,21 +19,21 @@ class SessionRepository {
     );
   }
 
-  Future<bool> complete({
+  Future<int> complete({
     required int id,
     required double duration,
   }) {
     return endSession(id: id, duration: duration, status: 'completed');
   }
 
-  Future<bool> endSession({
+  Future<int> endSession({
     required int id,
     required double duration,
     required String status,
   }) {
-    return _db.update(_db.sessions).replace(
+    return (_db.update(_db.sessions)..where((t) => t.id.equals(id)))
+        .write(
       SessionsCompanion(
-        id: Value(id),
         duration: Value(duration),
         status: Value(status),
         endedAt: Value(DateTime.now()),
@@ -50,42 +50,122 @@ class SessionRepository {
     return (_db.select(_db.sessions)..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
-  Future<bool> pause({
+  Future<int> pause({
     required int id,
   }) {
-    return _db.update(_db.sessions).replace(
+    return (_db.update(_db.sessions)..where((t) => t.id.equals(id)))
+        .write(
       SessionsCompanion(
-        id: Value(id),
         status: const Value('paused'),
-        runningSince: const Value.absent(),
+        runningSince: const Value(null),
       ),
     );
   }
 
-  Future<bool> resume({
+  Future<int> resume({
     required int id,
   }) {
-    return _db.update(_db.sessions).replace(
+    return (_db.update(_db.sessions)..where((t) => t.id.equals(id)))
+        .write(
       SessionsCompanion(
-        id: Value(id),
         status: const Value('running'),
         runningSince: Value(DateTime.now()),
       ),
     );
   }
 
-  Future<Session?> getRunning() {
-    return (_db.select(_db.sessions)
+  Future<Session?> getRunning() async {
+    final rows = await (_db.select(_db.sessions)
           ..where((t) => t.status.equals('running'))
           ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
-        .getSingleOrNull();
+        .get();
+    return rows.isEmpty ? null : rows.first;
   }
 
-  Future<Session?> getParked(int projectId) {
-    return (_db.select(_db.sessions)
+  /// The most recent actively-running (non-parked, runningSince not null)
+  /// session for [projectId], if any.
+  Future<Session?> getLatestRunning(int projectId) async {
+    final rows = await (_db.select(_db.sessions)
+          ..where((t) => t.projectId.equals(projectId) &
+              t.status.equals('running') &
+              t.runningSince.isNotNull())
+          ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
+        .get();
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<Session?> getParked(int projectId) async {
+    final rows = await (_db.select(_db.sessions)
           ..where((t) => t.projectId.equals(projectId) & t.status.equals('running') & t.endedAt.isNull() & t.runningSince.isNull())
           ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
-        .getSingleOrNull();
+        .get();
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// Closes out any leftover active/parked sessions for [projectId] (status
+  /// 'running' and no endedAt), optionally keeping [exceptId]. Used to guarantee
+  /// only a single active session per project, preventing the duplicate-parked
+  /// state that made [getParked]/[getLatestRunning] throw.
+  Future<void> endIncompleteForProject(int projectId, {int? exceptId}) async {
+    final update = _db.update(_db.sessions)..where((t) {
+      var exp = t.projectId.equals(projectId) &
+          t.status.equals('running') &
+          t.endedAt.isNull();
+      if (exceptId != null) exp = exp & t.id.equals(exceptId).not();
+      return exp;
+    });
+    await update.write(
+      SessionsCompanion(
+        status: const Value('interrupted'),
+        endedAt: Value(DateTime.now()),
+        runningSince: const Value(null),
+      ),
+    );
+  }
+
+  /// Parks the session: saves its elapsed duration but stops its running clock
+  /// (sets runningSince to NULL) while keeping status='running' and endedAt NULL.
+  /// A parked session can later be resumed with [resume] or adopted via switch.
+  Future<int> park({
+    required int id,
+    required double duration,
+  }) {
+    return (_db.update(_db.sessions)..where((t) => t.id.equals(id)))
+        .write(
+      SessionsCompanion(
+        duration: Value(duration),
+        status: const Value('running'),
+        runningSince: const Value(null),
+      ),
+    );
+  }
+
+  /// The most recently parked session across all projects, if any.
+  Future<Session?> getLatestParked() async {
+    final rows = await (_db.select(_db.sessions)
+          ..where((t) => t.status.equals('running') & t.endedAt.isNull() & t.runningSince.isNull())
+          ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
+        .get();
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  /// All parked sessions (status 'running', endedAt NULL, runningSince NULL),
+  /// one per project. Consumers should only rely on the latest per project.
+  Future<List<Session>> getAllParked() {
+    return (_db.select(_db.sessions)
+          ..where((t) => t.status.equals('running') & t.endedAt.isNull() & t.runningSince.isNull())
+          ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
+        .get();
+  }
+
+  /// True if the given project has a session that is actively running right
+  /// now (runningSince not NULL).
+  Future<bool> hasActiveRunning() async {
+    final rows = await (_db.select(_db.sessions)
+          ..where((t) => t.status.equals('running') & t.runningSince.isNotNull())
+          ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
+        .get();
+    return rows.isNotEmpty;
   }
 
   Future<List<Session>> getForProject(int projectId) {
@@ -93,6 +173,25 @@ class SessionRepository {
           ..where((t) => t.projectId.equals(projectId))
           ..orderBy([(t) => OrderingTerm.desc(t.startedAt)]))
         .get();
+  }
+
+  /// Emits whenever the sessions table changes (insert/update/delete). Used to
+  /// invalidate cached summaries so counts/history refresh automatically.
+  Stream<int> watchSessionActivityStamp() {
+    return (_db.select(_db.sessions)
+          ..orderBy([(t) => OrderingTerm.desc(t.startedAt)])
+          ..limit(1))
+        .watch()
+        .map((rows) => rows.isEmpty ? 0 : rows.first.id);
+  }
+
+  /// Emits whenever the contributions table changes.
+  Stream<int> watchContributionActivityStamp() {
+    return (_db.select(_db.contributions)
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+          ..limit(1))
+        .watch()
+        .map((rows) => rows.isEmpty ? 0 : rows.first.id);
   }
 
   Stream<List<Session>> watchForProject(int projectId) {
@@ -137,13 +236,12 @@ class SessionRepository {
     )).get();
   }
 
-  Future<bool> updateContribution({
+  Future<int> updateContribution({
     required int id,
     required String title,
   }) {
-    return _db.update(_db.contributions).replace(
-      ContributionsCompanion(id: Value(id), title: Value(title)),
-    );
+    return (_db.update(_db.contributions)..where((t) => t.id.equals(id)))
+        .write(ContributionsCompanion(title: Value(title)));
   }
 
   Future<int> deleteContribution(int id) {

@@ -21,13 +21,13 @@ class NoteRepository {
     );
   }
 
-  Future<bool> update({
+  Future<int> update({
     required int id,
     required String content,
   }) {
-    return _db.update(_db.notes).replace(
+    return (_db.update(_db.notes)..where((t) => t.id.equals(id)))
+        .write(
       db.NotesCompanion(
-        id: Value(id),
         content: Value(content),
         updatedAt: Value(DateTime.now()),
       ),
@@ -52,6 +52,15 @@ class NoteRepository {
           ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
         .watch()
         .map((notes) => notes.map(_toModel).toList());
+  }
+
+  /// Emits whenever the notes table changes, to invalidate caches.
+  Stream<int> watchNoteActivityStamp() {
+    return (_db.select(_db.notes)
+          ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)])
+          ..limit(1))
+        .watch()
+        .map((rows) => rows.isEmpty ? 0 : rows.first.id);
   }
 
   models.Note _toModel(db.Note n) {

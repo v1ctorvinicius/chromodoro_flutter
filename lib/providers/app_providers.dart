@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/app_database.dart' as db;
 import '../models/project.dart' as models;
@@ -7,6 +8,10 @@ import '../repositories/session_repository.dart';
 import '../repositories/note_repository.dart';
 import '../repositories/settings_repository.dart';
 import '../services/timer_service.dart';
+import '../services/notification_service.dart';
+import '../services/tray_service.dart';
+import '../services/window_prefs.dart';
+import '../services/window_service.dart';
 import '../models/app_settings.dart';
 
 // Database provider
@@ -29,6 +34,11 @@ final noteRepositoryProvider = Provider<NoteRepository>((ref) {
 
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return SettingsRepository(ref.watch(databaseProvider));
+});
+
+// Window geometry / mini position persistence.
+final windowPrefsProvider = Provider<WindowPrefs>((ref) {
+  return WindowPrefs(ref.watch(settingsRepositoryProvider));
 });
 
 // Settings provider
@@ -55,6 +65,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
     final repo = ref.read(settingsRepositoryProvider);
     await repo.save(settings);
     state = settings;
+    // Propagate new settings to the active timer.
+    ref.read(timerServiceProvider).updateSettings(settings);
   }
 }
 
@@ -62,8 +74,114 @@ class SettingsNotifier extends Notifier<AppSettings> {
 final timerServiceProvider = Provider<TimerService>((ref) {
   final sessionRepo = ref.read(sessionRepositoryProvider);
   final settings = ref.read(settingsProvider).value ?? const AppSettings();
-  return TimerService(sessionRepo, settings);
+  final timer = TimerService(sessionRepo, settings);
+  timer.onPhaseComplete = (title, body) {
+    final current = ref.read(settingsNotifierProvider);
+    if (!current.soundAlerts) return;
+    ref.read(notificationServiceProvider).show(
+          id: 1001,
+          title: title,
+          body: body,
+        );
+  };
+  return timer;
 });
+
+// Notification service provider
+final notificationServiceProvider = Provider<NotificationService>((ref) {
+  return NotificationService();
+});
+
+// System tray service provider
+final trayServiceProvider = Provider<TrayService>((ref) {
+  final tray = TrayService();
+
+  tray.onToggleWindow = toggleAppWindow;
+
+  tray.onToggleTimer = () {
+    final timer = ref.read(timerServiceProvider);
+    if (timer.isRunning) {
+      timer.pause();
+    } else if (timer.state == TimerState.paused) {
+      timer.resume();
+    }
+  };
+
+  tray.onCompletePhase = () {
+    final timer = ref.read(timerServiceProvider);
+    if (timer.isRunning) {
+      timer.completePhase();
+    }
+  };
+
+  tray.onToggleMini = () {
+    ref.read(miniModeProvider.notifier).toggle();
+  };
+
+  tray.onQuit = () async {
+    if (!ref.read(miniModeProvider)) {
+      await ref.read(windowPrefsProvider).saveCurrentGeometry();
+    }
+    quitApp();
+  };
+
+  tray.tooltipBuilder = () {
+    final timer = ref.read(timerServiceProvider);
+    return 'Chromodoro - ${timer.isRunning ? timer.formattedTime : 'idle'}';
+  };
+
+  return tray;
+});
+
+// Mini "domino" window mode: true while the window is shrunk to the compact
+// always-on-top pill. Drives both the window state and the app UI.
+final miniModeProvider =
+    NotifierProvider<MiniModeNotifier, bool>(MiniModeNotifier.new);
+
+class MiniModeNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  Future<void> enter() async {
+    final position = await ref.read(windowPrefsProvider).restoreSavedMiniPosition();
+    await enterMiniWindow(position: position);
+    state = true;
+  }
+
+  Future<void> exit() async {
+    try {
+      final pos = await currentWindowPosition();
+      await ref.read(windowPrefsProvider).saveMiniPosition(pos);
+    } catch (_) {
+      // Best-effort.
+    }
+    await exitMiniWindow();
+    state = false;
+  }
+
+  Future<void> toggle() async {
+    if (state) {
+      await exit();
+    } else {
+      await enter();
+    }
+  }
+}
+
+// Set to true to ask the dashboard (full window) to open the "switch project"
+// picker after exiting mini mode. The mini window is too small to host a menu.
+final miniSwitchRequestedProvider =
+    NotifierProvider<MiniSwitchRequestedNotifier, bool>(
+        MiniSwitchRequestedNotifier.new);
+
+class MiniSwitchRequestedNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void request() => state = true;
+
+  void consume() => state = false;
+}
 
 // Project list stream provider
 final projectsProvider = StreamProvider<List<models.Project>>((ref) {
@@ -75,6 +193,8 @@ final projectsProvider = StreamProvider<List<models.Project>>((ref) {
 final projectSummariesProvider = FutureProvider<List<ProjectSummary>>((ref) async {
   // Recompute whenever the projects stream emits (insert/update/archive).
   ref.watch(projectsProvider);
+  // Recompute whenever sessions/contributions/notes change.
+  ref.watch(dbActivityProvider);
   final projectRepo = ref.watch(projectRepositoryProvider);
   final noteRepo = ref.watch(noteRepositoryProvider);
 
@@ -147,18 +267,63 @@ final activeSessionProvider = StreamProvider<db.Session?>((ref) {
 });
 
 // Parked sessions provider
-// Returns map of projectId -> parked session id for projects that have a
-// running session parked (running but not actively timing).
+// Returns map of projectId -> parked elapsed seconds (the stored, frozen
+// duration) for projects that have a running session parked.
 final parkedSessionsProvider = StreamProvider<Map<int, int>>((ref) {
   final repo = ref.watch(sessionRepositoryProvider);
   return Stream.periodic(const Duration(seconds: 1)).asyncMap((_) async {
-    final running = await repo.getRunning();
-    if (running == null) return <int, int>{};
-    return <int, int>{};
+    final allParked = await repo.getAllParked();
+    final map = <int, int>{};
+    final seen = <int>{};
+    for (final s in allParked) {
+      if (seen.add(s.projectId)) {
+        final elapsed = (s.duration ?? 0.0).round();
+        map[s.projectId] = elapsed > 0 ? elapsed : 0;
+      }
+    }
+    return map;
   });
 });
 
+// Global today/this-week totals (completed + interrupted), like Python's
+// `global_totals`. Used by the dashboard footer.
+final globalTotalsProvider = FutureProvider<({int today, int week})>((ref) {
+  ref.watch(dbActivityProvider);
+  return ref.watch(projectRepositoryProvider).getGlobalTotals();
+});
+
+// Per-day totals for the current week (Mon..Sun), like Python's
+// `weekly_daily_totals`. Used by the dashboard week bar.
+final weeklyDailyTotalsProvider = FutureProvider<List<int>>((ref) {
+  ref.watch(dbActivityProvider);
+  return ref.watch(projectRepositoryProvider).getWeeklyDailyTotals();
+});
+
 // ---- Project view providers ----
+
+/// Emits whenever sessions, contributions, or notes change. Cached providers
+/// (dashboard summaries, contributions, counts, last activity, ...) watch this
+/// so they recompute automatically instead of going stale.
+final dbActivityProvider = StreamProvider<int>((ref) {
+  final sessionRepo = ref.watch(sessionRepositoryProvider);
+  final noteRepo = ref.watch(noteRepositoryProvider);
+  final controller = StreamController<int>();
+  final subs = <StreamSubscription<int>>[
+    sessionRepo
+        .watchSessionActivityStamp()
+        .listen((e) => controller.add(e)),
+    sessionRepo
+        .watchContributionActivityStamp()
+        .listen((e) => controller.add(e)),
+    noteRepo.watchNoteActivityStamp().listen((e) => controller.add(e)),
+  ];
+  controller.onCancel = () {
+    for (final s in subs) {
+      s.cancel();
+    }
+  };
+  return controller.stream;
+});
 
 final sessionsForProjectProvider =
     StreamProvider.autoDispose.family<List<db.Session>, int>((ref, id) {
@@ -167,7 +332,8 @@ final sessionsForProjectProvider =
 
 final contributionsForProjectProvider =
     FutureProvider.autoDispose.family<List<db.Contribution>, int>(
-        (ref, id) {
+        (ref, id) async {
+  ref.watch(dbActivityProvider);
   return ref.watch(sessionRepositoryProvider).getContributionsForProject(id);
 });
 
@@ -178,15 +344,15 @@ final notesForProjectProvider =
 
 final recentSessionProvider =
     FutureProvider.autoDispose.family<db.Session?, int>((ref, id) async {
-  final list = await ref.watch(sessionRepositoryProvider).getForProject(id);
-  return list.isEmpty ? null : list.first;
+  final sessions = ref.watch(sessionsForProjectProvider(id)).value ?? [];
+  return sessions.isEmpty ? null : sessions.first;
 });
 
 final totalSecondsForProjectProvider =
     FutureProvider.autoDispose.family<int, int>((ref, id) async {
   final sessions = ref.watch(sessionsForProjectProvider(id)).value ?? [];
   return sessions
-      .where((s) => s.status == 'completed')
+      .where((s) => s.status == 'completed' || s.status == 'interrupted')
       .fold<int>(0, (sum, s) => sum + (s.duration ?? 0).round());
 });
 
@@ -196,23 +362,28 @@ final todaySecondsForProjectProvider =
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
   return sessions
-      .where((s) => s.status == 'completed' && !s.startedAt.isBefore(today))
+      .where((s) =>
+          (s.status == 'completed' || s.status == 'interrupted') &&
+          !s.startedAt.isBefore(today))
       .fold<int>(0, (sum, s) => sum + (s.duration ?? 0).round());
 });
 
 final sessionCountForProjectProvider =
     FutureProvider.autoDispose.family<int, int>((ref, id) async {
   final sessions = ref.watch(sessionsForProjectProvider(id)).value ?? [];
-  return sessions.where((s) => s.status == 'completed').length;
+  return sessions
+      .where((s) => s.status == 'completed' || s.status == 'interrupted')
+      .length;
 });
 
 final contribCountForProjectProvider =
-    FutureProvider.autoDispose.family<int, int>((ref, id) {
+    FutureProvider.autoDispose.family<int, int>((ref, id) async {
+  ref.watch(dbActivityProvider);
   return ref.watch(projectRepositoryProvider).getContributionCountForProject(id);
 });
 
 final notesCountForProjectProvider =
     FutureProvider.autoDispose.family<int, int>((ref, id) async {
-  final notes = await ref.watch(noteRepositoryProvider).getForProject(id);
+  final notes = ref.watch(notesForProjectProvider(id)).value ?? [];
   return notes.length;
 });

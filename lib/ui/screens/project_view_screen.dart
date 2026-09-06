@@ -5,6 +5,7 @@ import '../../models/project.dart' as models;
 import '../../models/note.dart' as note_models;
 import '../../providers/app_providers.dart';
 import '../../utils/formatting.dart';
+import '../widgets/focus_bar.dart';
 import '../widgets/project_form_dialog.dart';
 import 'timer_screen.dart';
 
@@ -83,6 +84,18 @@ class _ProjectViewScreenState extends ConsumerState<ProjectViewScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 8),
+        FocusBar(
+          onToggleMini: () => ref.read(miniModeProvider.notifier).toggle(),
+          onOpenFocus: () {
+            final timer = ref.read(timerServiceProvider);
+            final pid = timer.activeProjectId ?? timer.lastProjectId;
+            if (pid == null) return;
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => TimerScreen(projectId: pid)),
+            );
+          },
+        ),
         const SizedBox(height: 16),
         Text(project.name.toUpperCase(),
             style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
@@ -95,13 +108,19 @@ class _ProjectViewScreenState extends ConsumerState<ProjectViewScreen> {
         _StatsRow(projectId: widget.projectId),
         const SizedBox(height: 12),
         Center(
-          child: FilledButton.icon(
-            onPressed: () => _startFocus(project),
-            icon: const Icon(Icons.timer),
-            label: const Text('Focus'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
-            ),
+          child: Consumer(
+            builder: (context, ref, _) {
+              final timer = ref.watch(timerServiceProvider);
+              final isOtherProjectActive = timer.isActive && timer.activeProjectId != null && timer.activeProjectId != widget.projectId;
+              return FilledButton.icon(
+                onPressed: isOtherProjectActive ? () => _switchToHere(project) : () => _startFocus(project),
+                icon: Icon(isOtherProjectActive ? Icons.swap_horiz : Icons.timer),
+                label: Text(isOtherProjectActive ? 'Switch here' : 'Focus'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 14),
+                ),
+              );
+            },
           ),
         ),
         const SizedBox(height: 12),
@@ -123,8 +142,19 @@ class _ProjectViewScreenState extends ConsumerState<ProjectViewScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => TimerScreen(projectId: id, startNow: true),
+        builder: (_) => TimerScreen(projectId: id),
       ),
+    );
+  }
+
+  void _switchToHere(models.Project project) {
+    final id = project.id;
+    if (id == null) return;
+    final timer = ref.read(timerServiceProvider);
+    timer.switchTo(id);
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => TimerScreen(projectId: id)),
     );
   }
 
@@ -196,12 +226,16 @@ class _StatsRow extends ConsumerWidget {
     final contribs = contribCountAsync.value ?? 0;
     final notes = notesCountAsync.value ?? 0;
 
+    final parkedMap = ref.watch(parkedSessionsProvider).value ?? const <int, int>{};
+    final parked = parkedMap[projectId] ?? 0;
+
     final blocks = [
       (formatDuration(total), 'Time invested'),
       (formatDuration(today), 'Today'),
       ('$sessions', 'Sessions'),
       ('$contribs', 'Contributions'),
       ('$notes', 'Notes'),
+      if (parked > 0) (formatDuration(parked), 'Parked'),
     ];
 
     return LayoutBuilder(
@@ -211,7 +245,7 @@ class _StatsRow extends ConsumerWidget {
           runSpacing: 12,
           children: blocks.map((b) {
             return SizedBox(
-              width: (constraints.maxWidth / 5) - 12,
+              width: (constraints.maxWidth / blocks.length) - 12,
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 16),

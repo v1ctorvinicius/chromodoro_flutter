@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -8,7 +9,9 @@ import 'package:window_manager/window_manager.dart';
 import 'database/app_database.dart';
 import 'providers/app_providers.dart';
 import 'services/db_migrator.dart';
+import 'services/tray_service.dart';
 import 'ui/screens/dashboard_screen.dart';
+import 'ui/widgets/mini_mode_view.dart';
 import 'ui/widgets/recovery_dialog.dart';
 
 void main() async {
@@ -46,18 +49,62 @@ class ChromodoroApp extends ConsumerStatefulWidget {
   ConsumerState<ChromodoroApp> createState() => _ChromodoroAppState();
 }
 
-class _ChromodoroAppState extends ConsumerState<ChromodoroApp> {
+class _ChromodoroAppState extends ConsumerState<ChromodoroApp>
+    with WindowListener {
+  Timer? _trayTooltipTicker;
+
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(this);
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
     await ref.read(settingsNotifierProvider.notifier).load();
+    // Restore the saved window size/position from the previous run.
+    await ref.read(windowPrefsProvider).restoreSavedGeometry();
+    try {
+      await ref.read(notificationServiceProvider).initialize();
+    } catch (_) {
+      // Notifications are best-effort; continue even if the platform rejects.
+    }
+    // System tray icon + menu.
+    await ref.read(trayServiceProvider).init();
+    _startTrayTooltipTicker();
+
+    // Start minimized to tray when requested.
+    final settings = ref.read(settingsNotifierProvider);
+    if (settings.startInTray) {
+      await windowManager.hide();
+    }
+
     if (!mounted) return;
     // After the first frame, check for an unfinished session from a previous run.
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkRecovery());
+  }
+
+  void _startTrayTooltipTicker() {
+    _trayTooltipTicker?.cancel();
+    _trayTooltipTicker = Timer.periodic(const Duration(seconds: 1), (_) async {
+      final tray = ref.read(trayServiceProvider);
+      final tooltip = tray.tooltipBuilder?.call();
+      if (tooltip != null) await tray.updateTooltip(tooltip);
+    });
+  }
+
+  @override
+  void onWindowClose() {
+    // Intercept close and send the app to the tray instead of quitting.
+    final settings = ref.read(settingsNotifierProvider);
+    if (!ref.read(miniModeProvider)) {
+      ref.read(windowPrefsProvider).saveCurrentGeometry();
+    }
+    if (settings.closeToTray) {
+      hideAppWindow();
+    } else {
+      quitApp();
+    }
   }
 
   Future<void> _checkRecovery() async {
@@ -102,7 +149,11 @@ class _ChromodoroAppState extends ConsumerState<ChromodoroApp> {
 
   @override
   Widget build(BuildContext context) {
+    final mini = ref.watch(miniModeProvider);
     return MaterialApp(
+      // Recreate the navigator when toggling mini mode, discarding any stacked
+      // routes so the compact view / dashboard start clean.
+      key: ValueKey(mini),
       title: 'Chromodoro',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -122,7 +173,7 @@ class _ChromodoroAppState extends ConsumerState<ChromodoroApp> {
         fontFamily: 'Inter',
       ),
       themeMode: ThemeMode.system,
-      home: const DashboardScreen(),
+      home: mini ? const MiniModeView() : const DashboardScreen(),
     );
   }
 }

@@ -99,8 +99,14 @@ class AppDatabase extends _$AppDatabase {
   Future<Session?> getSession(int id) => (select(sessions)..where((t) => t.id.equals(id))).getSingleOrNull();
   Future<List<Session>> getSessionsForProject(int projectId) => (select(sessions)..where((t) => t.projectId.equals(projectId))..orderBy([(t) => OrderingTerm.desc(t.startedAt)])).get();
   Stream<List<Session>> watchSessionsForProject(int projectId) => (select(sessions)..where((t) => t.projectId.equals(projectId))..orderBy([(t) => OrderingTerm.desc(t.startedAt)])).watch();
-  Future<Session?> getRunningSession() => (select(sessions)..where((t) => t.status.equals('running'))..orderBy([(t) => OrderingTerm.desc(t.startedAt)])).getSingleOrNull();
-  Future<Session?> getParkedSession(int projectId) => (select(sessions)..where((t) => t.projectId.equals(projectId) & t.status.equals('running') & t.endedAt.isNull() & t.runningSince.isNull())..orderBy([(t) => OrderingTerm.desc(t.startedAt)])).getSingleOrNull();
+  Future<Session?> getRunningSession() async {
+    final rows = await (select(sessions)..where((t) => t.status.equals('running'))..orderBy([(t) => OrderingTerm.desc(t.startedAt)])).get();
+    return rows.isEmpty ? null : rows.first;
+  }
+  Future<Session?> getParkedSession(int projectId) async {
+    final rows = await (select(sessions)..where((t) => t.projectId.equals(projectId) & t.status.equals('running') & t.endedAt.isNull() & t.runningSince.isNull())..orderBy([(t) => OrderingTerm.desc(t.startedAt)])).get();
+    return rows.isEmpty ? null : rows.first;
+  }
 
   // Contributions
   Future<int> insertContribution(ContributionsCompanion contribution) => into(contributions).insert(contribution);
