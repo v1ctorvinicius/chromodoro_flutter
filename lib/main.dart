@@ -33,7 +33,7 @@ void main() async {
 
 Future<void> _migrateLegacyData() async {
   final docs = await getApplicationDocumentsDirectory();
-  final destDb = AppDatabase(path: p.join(docs.path, 'chromodoro.db'));
+  final destDb = AppDatabase(path: p.join(docs.path, 'chromodoro', 'chromodoro.db'));
   final migrator = DbMigrator(destDb);
   try {
     await migrator.migrateIfNeeded();
@@ -64,6 +64,15 @@ class _ChromodoroAppState extends ConsumerState<ChromodoroApp>
     await ref.read(settingsNotifierProvider.notifier).load();
     // Restore the saved window size/position from the previous run.
     await ref.read(windowPrefsProvider).restoreSavedGeometry();
+    // Safety: ensure window is visible on-screen (fallback if saved geometry was off-screen).
+    await windowManager.show();
+    final pos = await windowManager.getPosition();
+    final size = await windowManager.getSize();
+    final screen = await _getScreenFrame();
+    if (pos.dx + size.width < 0 || pos.dy + size.height < 0 ||
+        pos.dx > screen.width || pos.dy > screen.height) {
+      await windowManager.center();
+    }
     try {
       await ref.read(notificationServiceProvider).initialize();
     } catch (_) {
@@ -82,6 +91,22 @@ class _ChromodoroAppState extends ConsumerState<ChromodoroApp>
     if (!mounted) return;
     // After the first frame, check for an unfinished session from a previous run.
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkRecovery());
+  }
+
+  /// Gets the virtual screen bounds (primary monitor).
+  Future<Rect> _getScreenFrame() async {
+    // window_manager doesn't expose screen size directly; use center() as fallback
+    // by getting the centered position which window_manager calculates from screen.
+    await windowManager.center();
+    final centeredPos = await windowManager.getPosition();
+    final size = await windowManager.getSize();
+    // Reverse-engineer screen bounds from centered position
+    return Rect.fromLTWH(
+      centeredPos.dx * 2,
+      centeredPos.dy * 2,
+      size.width * 2,
+      size.height * 2,
+    );
   }
 
   void _startTrayTooltipTicker() {

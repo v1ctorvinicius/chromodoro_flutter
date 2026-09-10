@@ -16,6 +16,7 @@ class Projects extends Table {
   RealColumn get weeklyGoalMinutes => real().withDefault(const Constant(0.0))();
   RealColumn get monthlyGoalMinutes => real().withDefault(const Constant(0.0))();
   TextColumn get goalDaysOfWeek => text().nullable()();
+  IntColumn get color => integer().withDefault(const Constant(0))();
 }
 
 class Sessions extends Table {
@@ -57,7 +58,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase({String? path}) : super(_openConnection(path: path));
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration {
@@ -140,9 +141,12 @@ class AppDatabase extends _$AppDatabase {
 
 LazyDatabase _openConnection({String? path}) {
   return LazyDatabase(() async {
+    final docsDir = await getApplicationDocumentsDirectory();
+    final dbDir = Directory(p.join(docsDir.path, 'chromodoro'));
+    if (!await dbDir.exists()) await dbDir.create(recursive: true);
     final file = path != null
         ? File(path)
-        : File(p.join((await getApplicationDocumentsDirectory()).path, 'chromodoro.db'));
+        : File(p.join(dbDir.path, 'chromodoro.db'));
     return NativeDatabase.createInBackground(file);
   });
 }

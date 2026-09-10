@@ -22,6 +22,12 @@ class DbMigrator {
     return p.join(appdata, 'Chromodoro', 'chromodoro.db');
   }
 
+  static String newDefaultPath() {
+    final docs = Platform.environment['USERPROFILE'] ??
+        p.join(Platform.environment['HOME'] ?? '');
+    return p.join(docs, 'Documents', 'chromodoro', 'chromodoro.db');
+  }
+
   AppDatabase get destination => _dest;
 
   Future<bool> migrateIfNeeded() async {

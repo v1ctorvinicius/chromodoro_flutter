@@ -114,6 +114,16 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _colorMeta = const VerificationMeta('color');
+  @override
+  late final GeneratedColumn<int> color = GeneratedColumn<int>(
+    'color',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -125,6 +135,7 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
     weeklyGoalMinutes,
     monthlyGoalMinutes,
     goalDaysOfWeek,
+    color,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -208,6 +219,12 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
         ),
       );
     }
+    if (data.containsKey('color')) {
+      context.handle(
+        _colorMeta,
+        color.isAcceptableOrUnknown(data['color']!, _colorMeta),
+      );
+    }
     return context;
   }
 
@@ -253,6 +270,10 @@ class $ProjectsTable extends Projects with TableInfo<$ProjectsTable, Project> {
         DriftSqlType.string,
         data['${effectivePrefix}goal_days_of_week'],
       ),
+      color: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}color'],
+      )!,
     );
   }
 
@@ -272,6 +293,7 @@ class Project extends DataClass implements Insertable<Project> {
   final double weeklyGoalMinutes;
   final double monthlyGoalMinutes;
   final String? goalDaysOfWeek;
+  final int color;
   const Project({
     required this.id,
     required this.name,
@@ -282,6 +304,7 @@ class Project extends DataClass implements Insertable<Project> {
     required this.weeklyGoalMinutes,
     required this.monthlyGoalMinutes,
     this.goalDaysOfWeek,
+    required this.color,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -299,6 +322,7 @@ class Project extends DataClass implements Insertable<Project> {
     if (!nullToAbsent || goalDaysOfWeek != null) {
       map['goal_days_of_week'] = Variable<String>(goalDaysOfWeek);
     }
+    map['color'] = Variable<int>(color);
     return map;
   }
 
@@ -317,6 +341,7 @@ class Project extends DataClass implements Insertable<Project> {
       goalDaysOfWeek: goalDaysOfWeek == null && nullToAbsent
           ? const Value.absent()
           : Value(goalDaysOfWeek),
+      color: Value(color),
     );
   }
 
@@ -337,6 +362,7 @@ class Project extends DataClass implements Insertable<Project> {
         json['monthlyGoalMinutes'],
       ),
       goalDaysOfWeek: serializer.fromJson<String?>(json['goalDaysOfWeek']),
+      color: serializer.fromJson<int>(json['color']),
     );
   }
   @override
@@ -352,6 +378,7 @@ class Project extends DataClass implements Insertable<Project> {
       'weeklyGoalMinutes': serializer.toJson<double>(weeklyGoalMinutes),
       'monthlyGoalMinutes': serializer.toJson<double>(monthlyGoalMinutes),
       'goalDaysOfWeek': serializer.toJson<String?>(goalDaysOfWeek),
+      'color': serializer.toJson<int>(color),
     };
   }
 
@@ -365,6 +392,7 @@ class Project extends DataClass implements Insertable<Project> {
     double? weeklyGoalMinutes,
     double? monthlyGoalMinutes,
     Value<String?> goalDaysOfWeek = const Value.absent(),
+    int? color,
   }) => Project(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -377,6 +405,7 @@ class Project extends DataClass implements Insertable<Project> {
     goalDaysOfWeek: goalDaysOfWeek.present
         ? goalDaysOfWeek.value
         : this.goalDaysOfWeek,
+    color: color ?? this.color,
   );
   Project copyWithCompanion(ProjectsCompanion data) {
     return Project(
@@ -399,6 +428,7 @@ class Project extends DataClass implements Insertable<Project> {
       goalDaysOfWeek: data.goalDaysOfWeek.present
           ? data.goalDaysOfWeek.value
           : this.goalDaysOfWeek,
+      color: data.color.present ? data.color.value : this.color,
     );
   }
 
@@ -413,7 +443,8 @@ class Project extends DataClass implements Insertable<Project> {
           ..write('dailyGoalMinutes: $dailyGoalMinutes, ')
           ..write('weeklyGoalMinutes: $weeklyGoalMinutes, ')
           ..write('monthlyGoalMinutes: $monthlyGoalMinutes, ')
-          ..write('goalDaysOfWeek: $goalDaysOfWeek')
+          ..write('goalDaysOfWeek: $goalDaysOfWeek, ')
+          ..write('color: $color')
           ..write(')'))
         .toString();
   }
@@ -429,6 +460,7 @@ class Project extends DataClass implements Insertable<Project> {
     weeklyGoalMinutes,
     monthlyGoalMinutes,
     goalDaysOfWeek,
+    color,
   );
   @override
   bool operator ==(Object other) =>
@@ -442,7 +474,8 @@ class Project extends DataClass implements Insertable<Project> {
           other.dailyGoalMinutes == this.dailyGoalMinutes &&
           other.weeklyGoalMinutes == this.weeklyGoalMinutes &&
           other.monthlyGoalMinutes == this.monthlyGoalMinutes &&
-          other.goalDaysOfWeek == this.goalDaysOfWeek);
+          other.goalDaysOfWeek == this.goalDaysOfWeek &&
+          other.color == this.color);
 }
 
 class ProjectsCompanion extends UpdateCompanion<Project> {
@@ -455,6 +488,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
   final Value<double> weeklyGoalMinutes;
   final Value<double> monthlyGoalMinutes;
   final Value<String?> goalDaysOfWeek;
+  final Value<int> color;
   const ProjectsCompanion({
     this.id = const Value.absent(),
     this.name = const Value.absent(),
@@ -465,6 +499,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     this.weeklyGoalMinutes = const Value.absent(),
     this.monthlyGoalMinutes = const Value.absent(),
     this.goalDaysOfWeek = const Value.absent(),
+    this.color = const Value.absent(),
   });
   ProjectsCompanion.insert({
     this.id = const Value.absent(),
@@ -476,6 +511,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     this.weeklyGoalMinutes = const Value.absent(),
     this.monthlyGoalMinutes = const Value.absent(),
     this.goalDaysOfWeek = const Value.absent(),
+    this.color = const Value.absent(),
   }) : name = Value(name),
        createdAt = Value(createdAt);
   static Insertable<Project> custom({
@@ -488,6 +524,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     Expression<double>? weeklyGoalMinutes,
     Expression<double>? monthlyGoalMinutes,
     Expression<String>? goalDaysOfWeek,
+    Expression<int>? color,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -500,6 +537,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
       if (monthlyGoalMinutes != null)
         'monthly_goal_minutes': monthlyGoalMinutes,
       if (goalDaysOfWeek != null) 'goal_days_of_week': goalDaysOfWeek,
+      if (color != null) 'color': color,
     });
   }
 
@@ -513,6 +551,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     Value<double>? weeklyGoalMinutes,
     Value<double>? monthlyGoalMinutes,
     Value<String?>? goalDaysOfWeek,
+    Value<int>? color,
   }) {
     return ProjectsCompanion(
       id: id ?? this.id,
@@ -524,6 +563,7 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
       weeklyGoalMinutes: weeklyGoalMinutes ?? this.weeklyGoalMinutes,
       monthlyGoalMinutes: monthlyGoalMinutes ?? this.monthlyGoalMinutes,
       goalDaysOfWeek: goalDaysOfWeek ?? this.goalDaysOfWeek,
+      color: color ?? this.color,
     );
   }
 
@@ -557,6 +597,9 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
     if (goalDaysOfWeek.present) {
       map['goal_days_of_week'] = Variable<String>(goalDaysOfWeek.value);
     }
+    if (color.present) {
+      map['color'] = Variable<int>(color.value);
+    }
     return map;
   }
 
@@ -571,7 +614,8 @@ class ProjectsCompanion extends UpdateCompanion<Project> {
           ..write('dailyGoalMinutes: $dailyGoalMinutes, ')
           ..write('weeklyGoalMinutes: $weeklyGoalMinutes, ')
           ..write('monthlyGoalMinutes: $monthlyGoalMinutes, ')
-          ..write('goalDaysOfWeek: $goalDaysOfWeek')
+          ..write('goalDaysOfWeek: $goalDaysOfWeek, ')
+          ..write('color: $color')
           ..write(')'))
         .toString();
   }
@@ -2007,6 +2051,7 @@ typedef $$ProjectsTableCreateCompanionBuilder = ProjectsCompanion Function({
   Value<double> weeklyGoalMinutes,
   Value<double> monthlyGoalMinutes,
   Value<String?> goalDaysOfWeek,
+  Value<int> color,
 });
 typedef $$ProjectsTableUpdateCompanionBuilder = ProjectsCompanion Function({
   Value<int> id,
@@ -2018,6 +2063,7 @@ typedef $$ProjectsTableUpdateCompanionBuilder = ProjectsCompanion Function({
   Value<double> weeklyGoalMinutes,
   Value<double> monthlyGoalMinutes,
   Value<String?> goalDaysOfWeek,
+  Value<int> color,
 });
 
 final class $$ProjectsTableReferences
@@ -2114,6 +2160,11 @@ class $$ProjectsTableFilterComposer
 
   ColumnFilters<String> get goalDaysOfWeek => $composableBuilder(
     column: $table.goalDaysOfWeek,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get color => $composableBuilder(
+    column: $table.color,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2221,6 +2272,11 @@ class $$ProjectsTableOrderingComposer
     column: $table.goalDaysOfWeek,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get color => $composableBuilder(
+    column: $table.color,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ProjectsTableAnnotationComposer
@@ -2268,6 +2324,9 @@ class $$ProjectsTableAnnotationComposer
     column: $table.goalDaysOfWeek,
     builder: (column) => column,
   );
+
+  GeneratedColumn<int> get color =>
+      $composableBuilder(column: $table.color, builder: (column) => column);
 
   Expression<T> sessionsRefs<T extends Object>(
     Expression<T> Function($$SessionsTableAnnotationComposer a) f,
@@ -2357,6 +2416,7 @@ class $$ProjectsTableTableManager
                 Value<double> weeklyGoalMinutes = const Value.absent(),
                 Value<double> monthlyGoalMinutes = const Value.absent(),
                 Value<String?> goalDaysOfWeek = const Value.absent(),
+                Value<int> color = const Value.absent(),
               }) => ProjectsCompanion(
                 id: id,
                 name: name,
@@ -2367,6 +2427,7 @@ class $$ProjectsTableTableManager
                 weeklyGoalMinutes: weeklyGoalMinutes,
                 monthlyGoalMinutes: monthlyGoalMinutes,
                 goalDaysOfWeek: goalDaysOfWeek,
+                color: color,
               ),
           createCompanionCallback:
               ({
@@ -2379,6 +2440,7 @@ class $$ProjectsTableTableManager
                 Value<double> weeklyGoalMinutes = const Value.absent(),
                 Value<double> monthlyGoalMinutes = const Value.absent(),
                 Value<String?> goalDaysOfWeek = const Value.absent(),
+                Value<int> color = const Value.absent(),
               }) => ProjectsCompanion.insert(
                 id: id,
                 name: name,
@@ -2389,6 +2451,7 @@ class $$ProjectsTableTableManager
                 weeklyGoalMinutes: weeklyGoalMinutes,
                 monthlyGoalMinutes: monthlyGoalMinutes,
                 goalDaysOfWeek: goalDaysOfWeek,
+                color: color,
               ),
           withReferenceMapper: (p0) => p0
               .map(

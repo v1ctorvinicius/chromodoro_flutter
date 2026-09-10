@@ -92,6 +92,15 @@ class TimerService extends ChangeNotifier {
   bool get isRunning => _state == TimerState.running;
   bool get isLongBreak => _mode == TimerMode.longBreak;
 
+  /// Duration of the upcoming break in seconds (short or long based on cycle count).
+  int get upcomingBreakSeconds {
+    final isLong = _completedCycles > 0 && _completedCycles % _settings.cyclesBeforeLongBreak == 0;
+    return (isLong ? _settings.longBreakMinutes : _settings.breakMinutes) * 60;
+  }
+
+  /// Duration of the next work session in seconds.
+  int get upcomingWorkSeconds => _settings.workMinutes * 60;
+
   /// True while the timer is bound to a session (running or paused) in memory.
   bool get isActive => _activeSessionId != null;
 

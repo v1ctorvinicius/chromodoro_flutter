@@ -62,7 +62,7 @@ class MiniModeView extends ConsumerWidget {
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                timer.formattedTime,
+                                _displayTime(timer),
                                 style: const TextStyle(
                                   fontFamily: 'RobotoMono',
                                   fontSize: 26,
@@ -91,16 +91,24 @@ class MiniModeView extends ConsumerWidget {
                     ),
                   ),
                 ),
-                // Action buttons (right).
+                // // Action buttons (right).
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _miniButton(
-                        onPressed: timer.isRunning ? timer.pause : timer.resume,
-                        icon: timer.isRunning ? Icons.pause : Icons.play_arrow,
+                        onPressed: _primaryAction(timer),
+                        icon: _primaryIcon(timer),
                       ),
+                      if (timer.mode != TimerMode.focus && timer.isRunning)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: _miniButton(
+                            onPressed: timer.skipBreak,
+                            icon: Icons.skip_next,
+                          ),
+                        ),
                       if (others.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -125,6 +133,46 @@ class MiniModeView extends ConsumerWidget {
         },
       ),
     );
+  }
+
+  VoidCallback? _primaryAction(TimerService timer) {
+    if (timer.isRunning) return timer.pause;
+    if (timer.state == TimerState.paused) return timer.resume;
+    if (timer.hasFinished) return timer.startBreak;
+    // Break just finished: timer is in focus mode with full work time but not running.
+    // This happens if auto-start didn't trigger (e.g., no active project).
+    // Offer to start the next focus manually.
+    if (timer.mode == TimerMode.focus &&
+        timer.remainingSeconds == timer.upcomingWorkSeconds &&
+        !timer.isRunning &&
+        timer.state != TimerState.paused) {
+      final pid = timer.activeProjectId;
+      if (pid != null) return () => timer.startFocus(pid);
+    }
+    return null; // idle: no primary action
+  }
+
+  IconData _primaryIcon(TimerService timer) {
+    if (timer.isRunning) return Icons.pause;
+    if (timer.state == TimerState.paused) return Icons.play_arrow;
+    if (timer.hasFinished) return Icons.play_arrow; // start break
+    // Break just finished, ready for next focus
+    if (timer.mode == TimerMode.focus &&
+        timer.remainingSeconds == timer.upcomingWorkSeconds &&
+        !timer.isRunning &&
+        timer.state != TimerState.paused) {
+      return Icons.play_arrow;
+    }
+    return Icons.play_arrow;
+  }
+
+  String _displayTime(TimerService timer) {
+    if (timer.hasFinished) {
+      final m = (timer.upcomingBreakSeconds ~/ 60).toString().padLeft(2, '0');
+      final s = (timer.upcomingBreakSeconds % 60).toString().padLeft(2, '0');
+      return '$m:$s';
+    }
+    return timer.formattedTime;
   }
 
   Widget _miniButton({
@@ -164,14 +212,15 @@ class _Phase {
   const _Phase(this.background, this.dot);
 
   static _Phase of(TimerService timer) {
-    if (timer.mode != TimerMode.focus) {
-      if (timer.isRunning) {
-        return timer.isLongBreak
-            ? const _Phase(Color(0xFFF3E5F5), Color(0xFFBA68C8))
-            : const _Phase(Color(0xFFE3F2FD), Color(0xFF64B5F6));
+    // Only show break phase when timer is actually in a break mode AND running.
+    // After focus completes, mode is still TimerMode.focus until startBreak() is called.
+    if (timer.mode != TimerMode.focus && timer.isRunning) {
+      if (timer.isLongBreak) {
+        return const _Phase(Color(0xFFF3E5F5), Color(0xFFBA68C8));
       }
-      return const _Phase(Color(0xFFE0E0E0), Color(0xFF9E9E9E));
+      return const _Phase(Color(0xFFE3F2FD), Color(0xFF64B5F6));
     }
+    // Focus mode or idle break (not running)
     if (timer.isRunning) {
       return const _Phase(Color(0xFFD7F2DA), Color(0xFF66BB6A));
     }

@@ -22,6 +22,7 @@ class ProjectRepository {
     double weeklyGoalMinutes = 0,
     double monthlyGoalMinutes = 0,
     List<int>? goalDaysOfWeek,
+    int color = 0,
   }) {
     return _db.into(_db.projects).insert(
       db.ProjectsCompanion(
@@ -33,11 +34,12 @@ class ProjectRepository {
         weeklyGoalMinutes: Value(weeklyGoalMinutes),
         monthlyGoalMinutes: Value(monthlyGoalMinutes),
         goalDaysOfWeek: Value(goalDaysOfWeek?.join(',')),
+        color: Value(color),
       ),
     );
   }
 
-  Future<int> update({
+Future<int> update({
     required int id,
     String? name,
     String? description,
@@ -46,6 +48,7 @@ class ProjectRepository {
     double? monthlyGoalMinutes,
     List<int>? goalDaysOfWeek,
     String? status,
+    int? color,
   }) {
     final companion = db.ProjectsCompanion(
       name: name != null ? Value(name) : const Value.absent(),
@@ -55,6 +58,7 @@ class ProjectRepository {
       monthlyGoalMinutes: monthlyGoalMinutes != null ? Value(monthlyGoalMinutes) : const Value.absent(),
       goalDaysOfWeek: goalDaysOfWeek != null ? Value(goalDaysOfWeek.join(',')) : const Value.absent(),
       status: status != null ? Value(status) : const Value.absent(),
+      color: color != null ? Value(color) : const Value.absent(),
     );
     return (_db.update(_db.projects)..where((t) => t.id.equals(id))).write(companion);
   }
@@ -92,12 +96,13 @@ class ProjectRepository {
       weeklyGoalMinutes: p.weeklyGoalMinutes,
       monthlyGoalMinutes: p.monthlyGoalMinutes,
       goalDaysOfWeek: p.goalDaysOfWeek ?? '',
+      color: p.color ?? 0,
     );
   }
 
   Future<Map<int, int>> getTotalSecondsPerProject() async {
     final rows = await _db.customSelect(
-      "SELECT project_id, SUM(duration) as total FROM sessions WHERE status IN ('completed', 'interrupted') GROUP BY project_id",
+      "SELECT project_id, COALESCE(SUM(duration), 0) as total FROM sessions WHERE status IN ('completed', 'interrupted') GROUP BY project_id",
       readsFrom: {_db.sessions},
     ).get();
     return {for (var row in rows) row.read<int>('project_id'): row.read<double>('total').toInt()};
@@ -225,7 +230,7 @@ class ProjectRepository {
     final today = DateTime.now();
     final startOfDay = DateTime(today.year, today.month, today.day);
     final rows = await _db.customSelect(
-      "SELECT project_id, SUM(duration) as total FROM sessions WHERE status IN ('completed', 'interrupted') AND started_at >= ? GROUP BY project_id",
+      "SELECT project_id, COALESCE(SUM(duration), 0) as total FROM sessions WHERE status IN ('completed', 'interrupted') AND started_at >= ? GROUP BY project_id",
       variables: [Variable.withDateTime(startOfDay)],
       readsFrom: {_db.sessions},
     ).get();

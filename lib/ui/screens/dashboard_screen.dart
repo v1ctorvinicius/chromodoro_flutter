@@ -11,6 +11,13 @@ import 'project_view_screen.dart';
 import 'timer_screen.dart';
 import 'stats_screen.dart';
 
+/// Generates a consistent color from a string (e.g., project ID).
+Color _colorFromString(String input) {
+  final hash = input.codeUnits.fold<int>(0, (p, c) => p * 31 + c);
+  final hue = (hash % 360).toDouble();
+  return HSVColor.fromAHSV(1.0, hue, 0.55, 0.85).toColor();
+}
+
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
@@ -69,7 +76,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(),
             FocusBar(
               onToggleMini: () => ref.read(miniModeProvider.notifier).toggle(),
               onOpenFocus: () {
@@ -81,6 +87,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 );
               },
             ),
+            const SizedBox(height: 8),
+            _buildHeader(),
             const SizedBox(height: 8),
             _buildFilterBar(),
             Expanded(
@@ -274,6 +282,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           timerIsPaused: timer.state == TimerState.paused,
           hasParked: hasParked,
           parkedSeconds: parkedSeconds,
+          todaySeconds: summary.todaySeconds,
+          weekSeconds: 0,
+          monthSeconds: 0,
         );
       },
     );
@@ -329,9 +340,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           final idx = dayNames.indexOf(_dayFilter);
           if (idx >= 0) {
             if (days.isEmpty || !days.contains(idx)) return false;
-          }
-        }
-      }
+}
+  }
+}
       
       return true;
     }).toList();
@@ -369,7 +380,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       context: context,
       builder: (_) => ProjectFormDialog(
         title: 'New project',
-        onSave: (name, description, daily, weekly, monthly, days) async {
+        onSave: (name, description, daily, weekly, monthly, days, color) async {
           await ref.read(projectRepositoryProvider).create(
                 name: name,
                 description: description,
@@ -377,6 +388,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 weeklyGoalMinutes: weekly,
                 monthlyGoalMinutes: monthly,
                 goalDaysOfWeek: days,
+                color: color,
               );
         },
       ),
@@ -394,7 +406,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         initialWeekly: project.weeklyGoalMinutes,
         initialMonthly: project.monthlyGoalMinutes,
         initialDays: parseGoalDays(project.goalDaysOfWeek),
-        onSave: (name, description, daily, weekly, monthly, days) async {
+        initialColor: project.color,
+        onSave: (name, description, daily, weekly, monthly, days, color) async {
           final id = project.id;
           if (id == null) return;
           await ref.read(projectRepositoryProvider).update(
@@ -405,6 +418,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 weeklyGoalMinutes: weekly,
                 monthlyGoalMinutes: monthly,
                 goalDaysOfWeek: days,
+                color: color,
               );
         },
       ),
@@ -445,7 +459,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => TimerScreen(projectId: id)),
-    );
+    ).then((_) {
+      // After returning from TimerScreen, if we came from mini mode, re-enter it
+      if (ref.read(miniSwitchRequestedProvider)) {
+        ref.read(miniSwitchRequestedProvider.notifier).consume();
+        ref.read(miniModeProvider.notifier).enter();
+      }
+    });
   }
 
   Future<void> _showMiniSwitchDialog() async {
@@ -488,7 +508,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ],
       ),
     );
-    if (chosen != null && mounted) _switchToProject(chosen);
+    if (chosen != null && mounted) {
+      _switchToProject(chosen);
+    } else if (mounted) {
+      // User cancelled the switch dialog - re-enter mini mode
+      ref.read(miniModeProvider.notifier).enter();
+    }
   }
 
   void _quickWork(models.Project project) {
@@ -522,7 +547,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-class _ProjectCard extends StatelessWidget {
+class _ProjectCard extends ConsumerWidget {
   final ProjectSummary summary;
   final VoidCallback onTap;
   final VoidCallback onQuickWork;
@@ -534,6 +559,9 @@ class _ProjectCard extends StatelessWidget {
   final bool timerIsPaused;
   final bool hasParked;
   final int parkedSeconds;
+  final int todaySeconds;
+  final int weekSeconds;
+  final int monthSeconds;
 
   const _ProjectCard({
     required this.summary,
@@ -547,17 +575,23 @@ class _ProjectCard extends StatelessWidget {
     this.timerIsPaused = false,
     this.hasParked = false,
     this.parkedSeconds = 0,
+    this.todaySeconds = 0,
+    this.weekSeconds = 0,
+    this.monthSeconds = 0,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final p = summary.project;
     final theme = Theme.of(context);
     final isActiveProject = activeProjectId == p.id;
     final isActiveAndRunning = isActiveProject && timerIsRunning;
     final isActiveAndPaused = isActiveProject && timerIsPaused;
     final isParked = !isActiveProject && hasParked;
-    final dotColor = isActiveAndRunning
+
+    // User-defined project color (if set), else generated from ID, else primary.
+    final projectColor = p.color != 0 ? Color(p.color) : _colorFromString(p.id?.toString() ?? '0');
+    final statusColor = isActiveAndRunning
         ? const Color(0xFF66BB6A)
         : (isActiveAndPaused || isParked)
             ? const Color(0xFFFFB74D)
@@ -565,6 +599,16 @@ class _ProjectCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      elevation: isActiveProject ? 3 : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: isActiveProject
+            ? BorderSide(color: statusColor, width: 2)
+            : BorderSide.none,
+      ),
+      color: isActiveProject
+          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.15)
+          : null,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
@@ -573,59 +617,16 @@ class _ProjectCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  if (isActiveProject || isParked)
-                    Container(
-                      width: 8,
-                      height: 8,
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        color: dotColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  Expanded(
-                    child: Text(p.name, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        onPressed: onQuickWork,
-                        icon: Icon(onQuickWorkIsSwitch ? Icons.swap_horiz : Icons.timer),
-                        tooltip: onQuickWorkIsSwitch ? 'Switch to this project' : 'Focus',
-                      ),
-                      IconButton(onPressed: onEdit, icon: const Icon(Icons.edit), tooltip: 'Edit'),
-                      IconButton(onPressed: onArchive, icon: const Icon(Icons.archive), tooltip: 'Archive'),
-                    ],
-                  ),
-                ],
-              ),
+              _buildHeader(theme, p, isActiveProject, isActiveAndRunning, isActiveAndPaused, isParked, projectColor, statusColor),
               if (p.description?.isNotEmpty ?? false) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
                 Text(p.description!, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               ],
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 16,
-                runSpacing: 8,
-                children: [
-                  _StatChip(label: 'Total', value: formatDuration(summary.totalSeconds)),
-                  _StatChip(label: 'Sessions', value: summary.sessionCount.toString()),
-                  if (summary.todaySeconds > 0)
-                    _StatChip(label: 'Today', value: formatDuration(summary.todaySeconds)),
-                  if (isParked && parkedSeconds > 0)
-                    _StatChip(label: 'Parked', value: formatDuration(parkedSeconds)),
-                  if (summary.contributionCount > 0)
-                    _StatChip(label: 'Contributions', value: summary.contributionCount.toString()),
-                  if (summary.lastActivity != null)
-                    _StatChip(label: 'Last', value: formatDayLabel(summary.lastActivity!)),
-                ],
-              ),
+              _buildStatsRow(theme, isParked),
               if (summary.dailyGoalMinutes > 0 || summary.weeklyGoalMinutes > 0 || summary.monthlyGoalMinutes > 0) ...[
-                const SizedBox(height: 12),
-                _buildGoalsSection(summary, theme),
+                const SizedBox(height: 16),
+                _buildGoalsSection(theme, summary, projectColor),
               ],
             ],
           ),
@@ -634,59 +635,191 @@ class _ProjectCard extends StatelessWidget {
     );
   }
 
-  Widget _buildGoalsSection(ProjectSummary summary, ThemeData theme) {
+  Widget _buildHeader(ThemeData theme, models.Project p, bool isActiveProject,
+      bool isRunning, bool isPaused, bool isParked, Color projectColor, Color statusColor) {
+    return Row(
+      children: [
+        // Project color indicator (user-defined or generated)
+        Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: projectColor,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(p.name, style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              if (isActiveProject)
+                Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isRunning ? 'ACTIVE' : (isPaused ? 'PAUSED' : 'ACTIVE (idle)'),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: statusColor,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                )
+              else if (isParked)
+                Row(
+                  children: [
+                    Container(width: 6, height: 6, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
+                    const SizedBox(width: 6),
+                    Text('PARKED', style: theme.textTheme.bodySmall?.copyWith(color: statusColor, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        // Quick actions
+        if (isActiveProject) ...[
+          // Inline timer controls for active project
+          Consumer(
+            builder: (_, ref, __) {
+              final timer = ref.read(timerServiceProvider);
+              return IconButton(
+                onPressed: timer.isRunning ? timer.pause : timer.resume,
+                icon: Icon(timer.isRunning ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                tooltip: timer.isRunning ? 'Pause' : 'Resume',
+                style: IconButton.styleFrom(
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: theme.colorScheme.onPrimary,
+                  minimumSize: const Size(36, 36),
+                ),
+              );
+            },
+          ),
+        ] else ...[
+          IconButton(
+            onPressed: onQuickWork,
+            icon: Icon(onQuickWorkIsSwitch ? Icons.swap_horiz : Icons.play_arrow_rounded),
+            tooltip: onQuickWorkIsSwitch ? 'Switch to this project' : 'Start focus',
+            style: IconButton.styleFrom(
+              backgroundColor: onQuickWorkIsSwitch ? theme.colorScheme.surfaceContainerHighest : projectColor.withValues(alpha: 0.15),
+              foregroundColor: onQuickWorkIsSwitch ? theme.colorScheme.onSurfaceVariant : projectColor,
+            ),
+          ),
+        ],
+        const SizedBox(width: 4),
+        PopupMenuButton<String>(
+          onSelected: (v) {
+            if (v == 'edit') onEdit();
+            if (v == 'archive') onArchive();
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Edit'), contentPadding: EdgeInsets.zero)),
+            const PopupMenuItem(value: 'archive', child: ListTile(leading: Icon(Icons.archive), title: Text('Archive'), contentPadding: EdgeInsets.zero)),
+          ],
+          icon: Icon(Icons.more_vert, color: theme.colorScheme.onSurfaceVariant),
+          tooltip: 'More options',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatsRow(ThemeData theme, bool isParked) {
+    final children = <Widget>[
+      _StatChip(icon: Icons.timer_outlined, label: 'Total', value: formatDuration(summary.totalSeconds)),
+      _StatChip(icon: Icons.repeat_outlined, label: 'Sessions', value: summary.sessionCount.toString()),
+    ];
+    if (summary.todaySeconds > 0) {
+      children.add(_StatChip(icon: Icons.today_outlined, label: 'Today', value: formatDuration(summary.todaySeconds)));
+    }
+    if (isParked && parkedSeconds > 0) {
+      children.add(_StatChip(icon: Icons.pause_circle_outline, label: 'Parked', value: formatDuration(parkedSeconds)));
+    }
+    if (summary.contributionCount > 0) {
+      children.add(_StatChip(icon: Icons.note_alt_outlined, label: 'Notes', value: summary.contributionCount.toString()));
+    }
+    if (summary.lastActivity != null) {
+      children.add(_StatChip(icon: Icons.history_outlined, label: 'Last', value: formatDayLabel(summary.lastActivity!)));
+    }
+    return Wrap(spacing: 8, runSpacing: 6, children: children);
+  }
+
+  Widget _buildGoalsSection(ThemeData theme, ProjectSummary summary, Color projectColor) {
     final goals = <Widget>[];
-    
     if (summary.dailyGoalMinutes > 0) {
       goals.add(_GoalProgress(
         label: 'Today',
-        current: 0,
+        current: todaySeconds,
         target: (summary.dailyGoalMinutes * 60).round(),
+        color: projectColor,
       ));
     }
     if (summary.weeklyGoalMinutes > 0) {
       goals.add(_GoalProgress(
         label: 'This week',
-        current: 0,
+        current: weekSeconds,
         target: (summary.weeklyGoalMinutes * 60).round(),
+        color: projectColor,
       ));
     }
     if (summary.monthlyGoalMinutes > 0) {
       goals.add(_GoalProgress(
         label: 'This month',
-        current: 0,
+        current: monthSeconds,
         target: (summary.monthlyGoalMinutes * 60).round(),
+        color: projectColor,
       ));
     }
-    
     final days = parseGoalDays(summary.goalDaysOfWeek);
     if (days.isNotEmpty) {
       final activeDays = days.map((d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d]).join(', ');
-      goals.add(Text('Active: $activeDays', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)));
+      goals.add(Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(
+          children: [
+            Icon(Icons.event_repeat, size: 14, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Expanded(child: Text('Active: $activeDays', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant))),
+          ],
+        ),
+      ));
     }
-    
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: goals,
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: goals);
   }
 }
 
 class _StatChip extends StatelessWidget {
+  final IconData? icon;
   final String label;
   final String value;
 
-  const _StatChip({required this.label, required this.value});
+  const _StatChip({this.icon, required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
-      child: Text('$label: $value', style: Theme.of(context).textTheme.bodySmall),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 13, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 4),
+          ],
+          Text('$label: $value', style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500)),
+        ],
+      ),
     );
   }
 }
@@ -695,15 +828,16 @@ class _GoalProgress extends StatelessWidget {
   final String label;
   final int current;
   final int target;
+  final Color color;
 
-  const _GoalProgress({required this.label, required this.current, required this.target});
+  const _GoalProgress({required this.label, required this.current, required this.target, required this.color});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final ratio = target > 0 ? (current / target).clamp(0.0, 1.0) : 0.0;
     final done = ratio >= 1.0;
-    
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -711,12 +845,20 @@ class _GoalProgress extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('$label: ${formatDuration(current)} / ${formatDuration(target)}',
-                style: TextStyle(color: done ? Colors.green : theme.colorScheme.onSurfaceVariant, fontSize: 12)),
+                style: TextStyle(color: done ? Colors.green : theme.colorScheme.onSurfaceVariant, fontSize: 12, fontWeight: FontWeight.w500)),
             if (done) const Icon(Icons.check_circle, color: Colors.green, size: 16),
           ],
         ),
         const SizedBox(height: 4),
-        LinearProgressIndicator(value: ratio, backgroundColor: theme.colorScheme.surfaceContainerHighest, color: done ? Colors.green : theme.colorScheme.primary),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: LinearProgressIndicator(
+            value: ratio,
+            minHeight: 6,
+            backgroundColor: theme.colorScheme.surfaceContainerHighest,
+            color: done ? Colors.green : color,
+          ),
+        ),
       ],
     );
   }

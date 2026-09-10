@@ -8,6 +8,7 @@ class Project {
   final double weeklyGoalMinutes;
   final double monthlyGoalMinutes;
   final String goalDaysOfWeek;
+  final int color; // ARGB int (0 = auto-generate)
 
   const Project({
     this.id,
@@ -19,6 +20,7 @@ class Project {
     this.weeklyGoalMinutes = 0,
     this.monthlyGoalMinutes = 0,
     this.goalDaysOfWeek = '',
+    this.color = 0,
   });
 
   Project copyWith({
@@ -31,6 +33,7 @@ class Project {
     double? weeklyGoalMinutes,
     double? monthlyGoalMinutes,
     String? goalDaysOfWeek,
+    int? color,
   }) {
     return Project(
       id: id ?? this.id,
@@ -42,6 +45,7 @@ class Project {
       weeklyGoalMinutes: weeklyGoalMinutes ?? this.weeklyGoalMinutes,
       monthlyGoalMinutes: monthlyGoalMinutes ?? this.monthlyGoalMinutes,
       goalDaysOfWeek: goalDaysOfWeek ?? this.goalDaysOfWeek,
+      color: color ?? this.color,
     );
   }
 
@@ -58,10 +62,11 @@ class Project {
           dailyGoalMinutes == other.dailyGoalMinutes &&
           weeklyGoalMinutes == other.weeklyGoalMinutes &&
           monthlyGoalMinutes == other.monthlyGoalMinutes &&
-          goalDaysOfWeek == other.goalDaysOfWeek;
+          goalDaysOfWeek == other.goalDaysOfWeek &&
+          color == other.color;
 
   @override
-  int get hashCode => id.hashCode ^ name.hashCode ^ description.hashCode ^ status.hashCode ^ createdAt.hashCode;
+  int get hashCode => id.hashCode ^ name.hashCode ^ description.hashCode ^ status.hashCode ^ createdAt.hashCode ^ dailyGoalMinutes.hashCode ^ weeklyGoalMinutes.hashCode ^ monthlyGoalMinutes.hashCode ^ goalDaysOfWeek.hashCode ^ color.hashCode;
 }
 
 class Session {
